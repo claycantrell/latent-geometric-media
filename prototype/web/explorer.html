@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Embedding Explorer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000; color: #fff;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    overflow: hidden; height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  #header { padding: 10px 0 4px; text-align: center; }
+  #header h1 { font-size: 15px; font-weight: 400; letter-spacing: 3px; text-transform: uppercase; color: #888; }
+  #subtitle { font-size: 11px; color: #444; margin-top: 2px; }
+
+  #main { flex: 1; display: flex; width: 100%; min-height: 0; }
+  #canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+  canvas { border: 1px solid #1a1a1a; }
+
+  #tooltip {
+    position: absolute; pointer-events: none; display: none;
+    background: rgba(0,0,0,0.85); border: 1px solid #333; border-radius: 4px;
+    padding: 5px 8px; font-size: 11px; white-space: nowrap; z-index: 100;
+  }
+  #tooltip .word { color: #fff; font-weight: 700; }
+  #tooltip .cat { color: #888; font-size: 10px; }
+
+  #side-panel {
+    width: 280px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px;
+    border-left: 1px solid #1a1a1a; overflow-y: auto;
+  }
+  #side-panel h2 { font-size: 11px; color: #555; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 2px; }
+
+  .concept-row { display: flex; flex-direction: column; gap: 3px; }
+  .concept-label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+  .concept-inputs { display: flex; gap: 5px; align-items: center; }
+  .concept-inputs span { font-size: 12px; color: #555; }
+  input[type="text"] {
+    background: #111; border: 1px solid #333; color: #ddd;
+    padding: 5px 7px; font-family: inherit; font-size: 11px;
+    border-radius: 3px; width: 100%;
+  }
+  input[type="text"]:focus { border-color: #4488ff; outline: none; }
+
+  button {
+    background: #111; color: #aaa; border: 1px solid #333;
+    padding: 6px 12px; font-family: inherit; font-size: 11px;
+    cursor: pointer; border-radius: 3px; transition: all 0.15s;
+  }
+  button:hover { background: #1a1a1a; color: #fff; border-color: #555; }
+  button.primary { border-color: #4488ff; color: #4488ff; }
+
+  .lens-btn {
+    display: block; width: 100%; text-align: left; padding: 6px 10px;
+    margin-bottom: 3px; font-size: 11px;
+  }
+  .lens-btn:hover { border-color: #4488ff; color: #4488ff; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .legend-item {
+    font-size: 9px; padding: 2px 6px; border-radius: 2px;
+    cursor: pointer; opacity: 0.7; transition: opacity 0.15s;
+    border: 1px solid transparent;
+  }
+  .legend-item:hover { opacity: 1; }
+  .legend-item.active { opacity: 1; border-color: #fff; }
+
+  #info { font-size: 10px; color: #333; line-height: 1.5; margin-top: auto; }
+  #axis-labels { font-size: 10px; color: #555; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Embedding Explorer</h1>
+  <div id="subtitle">same data, different concept lenses → different structure</div>
+</div>
+
+<div id="main">
+  <div id="canvas-wrap">
+    <canvas id="c"></canvas>
+    <div id="tooltip"><span class="word"></span><br><span class="cat"></span></div>
+  </div>
+  <div id="side-panel">
+    <h2>Concept Lens</h2>
+    <div class="concept-row">
+      <span class="concept-label">X axis</span>
+      <div class="concept-inputs">
+        <input type="text" id="pos1" placeholder="positive..." value="hot, warm, burning">
+        <span>↔</span>
+        <input type="text" id="neg1" placeholder="negative..." value="cold, frozen, icy">
+      </div>
+    </div>
+    <div class="concept-row">
+      <span class="concept-label">Y axis</span>
+      <div class="concept-inputs">
+        <input type="text" id="pos2" placeholder="positive..." value="wild, dangerous, natural">
+        <span>↔</span>
+        <input type="text" id="neg2" placeholder="negative..." value="domestic, tame, safe">
+      </div>
+    </div>
+    <button class="primary" id="btn-project" style="margin-top:2px">Apply Lens</button>
+    <div id="axis-labels"></div>
+
+    <hr style="border:none;border-top:1px solid #1a1a1a">
+    <h2>Suggested Lenses</h2>
+    <div id="lens-buttons"></div>
+
+    <hr style="border:none;border-top:1px solid #1a1a1a">
+    <h2>Categories</h2>
+    <div class="legend" id="legend"></div>
+
+    <hr style="border:none;border-top:1px solid #1a1a1a">
+    <button id="btn-pca">PCA (default axes)</button>
+    <button id="btn-random">Random projection</button>
+
+    <div id="info">
+      <strong style="color:#555">Embedding-space microscope.</strong><br>
+      194 words in 384-dimensional sentence-transformer space.
+      Each concept lens reveals different structure in the same data.
+      Hover points to see words.
+    </div>
+  </div>
+</div>
+
+<script>
+let DATA = null;
+let currentBasis = null;
+let projected = null;
+let animating = false, animStart = 0, animDuration = 600;
+let animFromBasis = null, animToBasis = null;
+let hiddenCategories = new Set();
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const tooltip = document.getElementById('tooltip');
+
+fetch('explorer_data.json')
+  .then(r => r.json())
+  .then(d => { DATA = d; buildVocabIndex(); init(); })
+  .catch(e => console.error(e));
+
+let vocabIndex = {};
+function buildVocabIndex() {
+  for (let i = 0; i < DATA.concept_vocab.length; i++) {
+    vocabIndex[DATA.concept_vocab[i]] = i;
+  }
+}
+function getEmb(word) {
+  word = word.trim().toLowerCase();
+  return vocabIndex[word] !== undefined ? DATA.concept_embeddings[vocabIndex[word]] : null;
+}
+
+// --- Linear algebra ---
+function norm(v){let s=0;for(let i=0;i<v.length;i++)s+=v[i]*v[i];return Math.sqrt(s);}
+function dot(a,b){let s=0;for(let i=0;i<a.length;i++)s+=a[i]*b[i];return s;}
+function orthogonalize(u,v){
+  const d=u.length;let nu=norm(u);u=u.map(x=>x/nu);
+  let dv=dot(v,u);v=v.map((x,i)=>x-dv*u[i]);let nv=norm(v);v=v.map(x=>x/nv);
+  let b=[];for(let i=0;i<d;i++)b.push([u[i],v[i]]);return b;
+}
+function lerpBasis(a,b,t){
+  const d=a.length;let u=[],v=[];
+  for(let i=0;i<d;i++){u.push((1-t)*a[i][0]+t*b[i][0]);v.push((1-t)*a[i][1]+t*b[i][1]);}
+  return orthogonalize(u,v);
+}
+function copyBasis(b){return b.map(r=>[r[0],r[1]]);}
+function randomBasis(d){
+  let u=Array.from({length:d},()=>Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random()));
+  let v=Array.from({length:d},()=>Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random()));
+  return orthogonalize(u,v);
+}
+
+// --- PCA (simple power iteration for top 2 components) ---
+function pcaBasis(points) {
+  const n = points.length, d = points[0].length;
+  // Center
+  let mean = new Array(d).fill(0);
+  for (let i=0;i<n;i++) for(let j=0;j<d;j++) mean[j]+=points[i][j];
+  mean = mean.map(x=>x/n);
+  // Power iteration for first PC
+  let v1 = Array.from({length:d},()=>Math.random()-0.5);
+  for (let iter=0;iter<50;iter++) {
+    let nv = new Array(d).fill(0);
+    for (let i=0;i<n;i++) {
+      let dp=0; for(let j=0;j<d;j++) dp+=(points[i][j]-mean[j])*v1[j];
+      for(let j=0;j<d;j++) nv[j]+=dp*(points[i][j]-mean[j]);
+    }
+    let nn=norm(nv); v1=nv.map(x=>x/nn);
+  }
+  // Deflate and get second PC
+  let v2 = Array.from({length:d},()=>Math.random()-0.5);
+  let dp=dot(v2,v1); v2=v2.map((x,i)=>x-dp*v1[i]); let nn2=norm(v2); v2=v2.map(x=>x/nn2);
+  for (let iter=0;iter<50;iter++) {
+    let nv = new Array(d).fill(0);
+    for (let i=0;i<n;i++) {
+      let dp=0; for(let j=0;j<d;j++) dp+=(points[i][j]-mean[j])*v2[j];
+      for(let j=0;j<d;j++) nv[j]+=dp*(points[i][j]-mean[j]);
+    }
+    // Deflate
+    let dd=dot(nv,v1); nv=nv.map((x,i)=>x-dd*v1[i]);
+    let nn=norm(nv); v2=nv.map(x=>x/nn);
+  }
+  let b=[]; for(let i=0;i<d;i++) b.push([v1[i],v2[i]]); return b;
+}
+
+// --- Concept direction ---
+function conceptDir(posWords, negWords) {
+  const d = DATA.ambient_dim;
+  let pos=new Array(d).fill(0), neg=new Array(d).fill(0), pc=0, nc=0;
+  for(const w of posWords){const e=getEmb(w);if(e){for(let i=0;i<d;i++)pos[i]+=e[i];pc++;}}
+  for(const w of negWords){const e=getEmb(w);if(e){for(let i=0;i<d;i++)neg[i]+=e[i];nc++;}}
+  if(pc>0)pos=pos.map(x=>x/pc);
+  if(nc>0)neg=neg.map(x=>x/nc);
+  let dir=pos.map((x,i)=>x-neg[i]);
+  let n=norm(dir); if(n<1e-8)return null;
+  return dir.map(x=>x/n);
+}
+function parseWords(s){return s.split(/[,;\s]+/).map(w=>w.trim().toLowerCase()).filter(w=>w.length>0);}
+
+// --- Project ---
+function doProject(basis) {
+  const pts=DATA.points, n=pts.length, d=DATA.ambient_dim;
+  const out=new Float32Array(n*2);
+  for(let i=0;i<n;i++){let x=0,y=0;const row=pts[i];for(let j=0;j<d;j++){x+=row[j]*basis[j][0];y+=row[j]*basis[j][1];}out[i*2]=x;out[i*2+1]=y;}
+  return out;
+}
+
+// --- Init ---
+function init() {
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Start with PCA
+  currentBasis = pcaBasis(DATA.points);
+  projected = doProject(currentBasis);
+
+  // Lens buttons
+  const lensDiv = document.getElementById('lens-buttons');
+  for (const lens of DATA.suggested_lenses) {
+    const btn = document.createElement('button');
+    btn.className = 'lens-btn';
+    btn.textContent = lens.name;
+    btn.addEventListener('click', () => {
+      document.getElementById('pos1').value = lens.pos.join(', ');
+      document.getElementById('neg1').value = lens.neg.join(', ');
+      // For second axis, find a complementary suggested lens
+      const other = DATA.suggested_lenses.find(l => l !== lens);
+      if (other) {
+        document.getElementById('pos2').value = other.pos.join(', ');
+        document.getElementById('neg2').value = other.neg.join(', ');
+      }
+      onApply();
+    });
+    lensDiv.appendChild(btn);
+  }
+
+  // Legend
+  const legend = document.getElementById('legend');
+  for (const [cat, info] of Object.entries(DATA.category_colors)) {
+    const el = document.createElement('div');
+    el.className = 'legend-item active';
+    el.style.background = info + '33';
+    el.style.color = info;
+    el.textContent = cat.replace(/_/g, ' ');
+    el.dataset.cat = cat;
+    el.addEventListener('click', () => {
+      if (hiddenCategories.has(cat)) { hiddenCategories.delete(cat); el.classList.add('active'); }
+      else { hiddenCategories.add(cat); el.classList.remove('active'); }
+    });
+    legend.appendChild(el);
+  }
+
+  // Buttons
+  document.getElementById('btn-project').addEventListener('click', onApply);
+  document.getElementById('btn-pca').addEventListener('click', () => {
+    animateTo(pcaBasis(DATA.points), 600);
+    document.getElementById('axis-labels').textContent = 'Axes: PC1, PC2';
+  });
+  document.getElementById('btn-random').addEventListener('click', () => {
+    animateTo(randomBasis(DATA.ambient_dim), 500);
+    document.getElementById('axis-labels').textContent = 'Axes: random';
+  });
+
+  for (const id of ['pos1','neg1','pos2','neg2']) {
+    document.getElementById(id).addEventListener('keydown', e => { if(e.key==='Enter') onApply(); });
+  }
+
+  // Hover
+  canvas.addEventListener('mousemove', onHover);
+  canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+
+  document.getElementById('axis-labels').textContent = 'Axes: PCA';
+  requestAnimationFrame(loop);
+}
+
+function onApply() {
+  const d1 = conceptDir(parseWords(document.getElementById('pos1').value), parseWords(document.getElementById('neg1').value));
+  const d2 = conceptDir(parseWords(document.getElementById('pos2').value), parseWords(document.getElementById('neg2').value));
+  if (!d1 && !d2) return;
+  let basis;
+  if (d1 && d2) { basis = orthogonalize(d1, d2); }
+  else if (d1) { let r=Array.from({length:DATA.ambient_dim},()=>Math.random()-0.5);let dp=dot(r,d1);r=r.map((x,i)=>x-dp*d1[i]);let n=norm(r);r=r.map(x=>x/n);basis=orthogonalize(d1,r); }
+  else { let r=Array.from({length:DATA.ambient_dim},()=>Math.random()-0.5);let dp=dot(r,d2);r=r.map((x,i)=>x-dp*d2[i]);let n=norm(r);r=r.map(x=>x/n);basis=orthogonalize(r,d2); }
+  animateTo(basis, 600);
+  const l1 = document.getElementById('pos1').value.split(',')[0] + ' ↔ ' + document.getElementById('neg1').value.split(',')[0];
+  const l2 = document.getElementById('pos2').value.split(',')[0] + ' ↔ ' + document.getElementById('neg2').value.split(',')[0];
+  document.getElementById('axis-labels').textContent = `X: ${l1} | Y: ${l2}`;
+}
+
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  const size = Math.min(wrap.clientWidth - 16, wrap.clientHeight - 16, 800);
+  canvas.width = size * devicePixelRatio;
+  canvas.height = size * devicePixelRatio;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+
+// --- Render ---
+let drawParams = {}; // cache for hover
+
+function draw() {
+  const w = canvas.width/devicePixelRatio, h = canvas.height/devicePixelRatio;
+  const n = DATA.n_points;
+  ctx.fillStyle = '#000'; ctx.fillRect(0,0,w,h);
+
+  if (!projected) return;
+
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+  for(let i=0;i<n;i++){
+    if(hiddenCategories.has(DATA.categories[i])) continue;
+    const px=projected[i*2],py=projected[i*2+1];
+    if(px<xmin)xmin=px;if(px>xmax)xmax=px;if(py<ymin)ymin=py;if(py>ymax)ymax=py;
+  }
+  if(xmin===Infinity) return;
+
+  const span=Math.max(xmax-xmin,ymax-ymin)*1.2;
+  const cx=(xmin+xmax)/2,cy=(ymin+ymax)/2;
+  const margin=50, drawSize=Math.min(w,h)-margin*2, sc=drawSize/span;
+  const ox=w/2, oy=h/2;
+  drawParams = {cx,cy,sc,ox,oy};
+
+  // Draw points with category colors and labels
+  ctx.font = '9px monospace';
+  ctx.textAlign = 'center';
+
+  for(let i=0;i<n;i++){
+    if(hiddenCategories.has(DATA.categories[i])) continue;
+    const sx=ox+(projected[i*2]-cx)*sc;
+    const sy=oy+(projected[i*2+1]-cy)*sc;
+    const col = DATA.colors[i];
+
+    // Point
+    ctx.fillStyle = col + 'aa';
+    ctx.beginPath();
+    ctx.arc(sx, sy, 3.5, 0, Math.PI*2);
+    ctx.fill();
+
+    // Label
+    ctx.fillStyle = col + '88';
+    ctx.fillText(DATA.words[i], sx, sy - 6);
+  }
+
+  // Axes
+  ctx.strokeStyle = '#222';
+  ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(margin, oy); ctx.lineTo(w-margin, oy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(ox, margin); ctx.lineTo(ox, h-margin); ctx.stroke();
+}
+
+function onHover(e) {
+  if (!projected || !DATA) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = (e.clientX - rect.left);
+  const my = (e.clientY - rect.top);
+  const {cx,cy,sc,ox,oy} = drawParams;
+  if (!sc) return;
+
+  let closest = -1, closestDist = 15; // pixel threshold
+  for (let i=0; i<DATA.n_points; i++) {
+    if (hiddenCategories.has(DATA.categories[i])) continue;
+    const sx = ox + (projected[i*2]-cx)*sc;
+    const sy = oy + (projected[i*2+1]-cy)*sc;
+    const dist = Math.sqrt((mx-sx)**2 + (my-sy)**2);
+    if (dist < closestDist) { closestDist = dist; closest = i; }
+  }
+
+  if (closest >= 0) {
+    tooltip.style.display = 'block';
+    tooltip.style.left = (e.clientX - canvas.parentElement.getBoundingClientRect().left + 12) + 'px';
+    tooltip.style.top = (e.clientY - canvas.parentElement.getBoundingClientRect().top - 10) + 'px';
+    tooltip.querySelector('.word').textContent = DATA.words[closest];
+    tooltip.querySelector('.word').style.color = DATA.colors[closest];
+    tooltip.querySelector('.cat').textContent = DATA.categories[closest].replace(/_/g, ' ');
+  } else {
+    tooltip.style.display = 'none';
+  }
+}
+
+// --- Animation ---
+function animateTo(target,dur){animFromBasis=copyBasis(currentBasis);animToBasis=copyBasis(target);animStart=performance.now();animDuration=dur||600;animating=true;}
+
+function loop(time) {
+  if (!DATA) { requestAnimationFrame(loop); return; }
+  if (animating) {
+    let t=Math.min(1,(time-animStart)/animDuration);
+    t=t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+    currentBasis=lerpBasis(animFromBasis,animToBasis,t);
+    if(t>=1){animating=false;currentBasis=copyBasis(animToBasis);}
+  }
+  projected = doProject(currentBasis);
+  draw();
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
