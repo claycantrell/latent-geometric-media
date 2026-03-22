@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Semantic Anamorph</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000; color: #fff;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    overflow: hidden; height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  #header { padding: 12px 0 4px; text-align: center; }
+  #header h1 { font-size: 16px; font-weight: 400; letter-spacing: 4px; text-transform: uppercase; color: #888; }
+  #status { margin-top: 4px; font-size: 12px; color: #555; height: 16px; }
+
+  #main { flex: 1; display: flex; width: 100%; min-height: 0; }
+  #canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
+  canvas { border: 1px solid #1a1a1a; }
+
+  #side-panel {
+    width: 280px; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px;
+    border-left: 1px solid #1a1a1a; overflow-y: auto;
+  }
+  #side-panel h2 { font-size: 11px; color: #555; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 2px; }
+
+  .concept-row { display: flex; flex-direction: column; gap: 4px; }
+  .concept-label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+  .concept-inputs { display: flex; gap: 6px; align-items: center; }
+  .concept-inputs span { font-size: 12px; color: #555; }
+
+  input[type="text"] {
+    background: #111; border: 1px solid #333; color: #ddd;
+    padding: 6px 8px; font-family: inherit; font-size: 12px;
+    border-radius: 3px; width: 100%;
+  }
+  input[type="text"]:focus { border-color: #ff4444; outline: none; }
+  input[type="text"]::placeholder { color: #444; }
+
+  button {
+    background: #111; color: #aaa; border: 1px solid #333;
+    padding: 8px 14px; font-family: inherit; font-size: 12px;
+    letter-spacing: 1px; cursor: pointer; border-radius: 4px; transition: all 0.2s;
+  }
+  button:hover { background: #1a1a1a; color: #fff; border-color: #555; }
+  button.primary { border-color: #ff4444; color: #ff4444; }
+  button.primary:hover { background: #1a0808; }
+
+  .align-display {
+    text-align: center; padding: 8px 0;
+  }
+  .align-value { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .align-label { font-size: 10px; color: #555; margin-top: 2px; }
+  .align-bar { height: 6px; background: #111; border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .align-fill { height: 100%; border-radius: 3px; transition: width 0.3s, background 0.3s; }
+
+  .matched-words { font-size: 10px; color: #444; line-height: 1.6; margin-top: 4px; max-height: 60px; overflow-y: auto; }
+  .matched-words .match { color: #ff6644; }
+  .matched-words .no-match { color: #553333; }
+
+  #hint-area { font-size: 10px; color: #333; line-height: 1.5; margin-top: auto; }
+
+  #view-label {
+    position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+    font-size: 28px; font-weight: 700; letter-spacing: 6px;
+    opacity: 0; transition: opacity 0.5s; pointer-events: none;
+    text-shadow: 0 0 30px currentColor;
+  }
+
+  #controls {
+    padding: 8px 0 14px; display: flex; gap: 8px; align-items: center;
+    justify-content: center;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Semantic Anamorph</h1>
+  <div id="status">loading data...</div>
+</div>
+
+<div id="main">
+  <div id="canvas-wrap"><canvas id="c"></canvas></div>
+  <div id="side-panel">
+    <h2>Concept Query</h2>
+
+    <div class="concept-row">
+      <span class="concept-label">Axis 1</span>
+      <div class="concept-inputs">
+        <input type="text" id="pos1" placeholder="positive words..." value="cold, frozen, ice">
+        <span>↔</span>
+        <input type="text" id="neg1" placeholder="negative words..." value="warm, hot, fire">
+      </div>
+    </div>
+
+    <div class="concept-row">
+      <span class="concept-label">Axis 2</span>
+      <div class="concept-inputs">
+        <input type="text" id="pos2" placeholder="positive words..." value="mechanical, machine">
+        <span>↔</span>
+        <input type="text" id="neg2" placeholder="negative words..." value="organic, natural">
+      </div>
+    </div>
+
+    <button class="primary" id="btn-project" style="margin-top:4px;">Project</button>
+
+    <div class="align-display">
+      <div class="align-value" id="align-val" style="color:#335">0%</div>
+      <div class="align-label">alignment with hidden form</div>
+      <div class="align-bar"><div class="align-fill" id="align-fill" style="width:0%"></div></div>
+    </div>
+
+    <div>
+      <span class="concept-label">Matched vocabulary</span>
+      <div class="matched-words" id="matched-words"></div>
+    </div>
+
+    <hr style="border:none;border-top:1px solid #1a1a1a">
+    <h2>Presets</h2>
+    <button id="pre-exact">Exact concepts</button>
+    <button id="pre-synonym">Synonyms</button>
+    <button id="pre-wrong">Wrong concepts</button>
+    <button id="pre-random">Random view</button>
+    <button id="pre-reveal">Reveal answer</button>
+
+    <div id="hint-area">
+      <strong style="color:#555">How it works:</strong><br>
+      The hidden image lives in a subspace defined by two semantic contrasts.
+      Type word pairs that match the concept and hit Project.
+      Closer semantics → clearer form.
+    </div>
+  </div>
+</div>
+
+<div id="view-label"></div>
+
+<div id="controls">
+  <button id="btn-cycle">Cycle decoys</button>
+</div>
+
+<script>
+let DATA = null;
+let currentBasis = null;
+let warmth = 0;
+let animating = false, animStart = 0, animDuration = 600;
+let animFromBasis = null, animToBasis = null;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+fetch('semantic_data.json')
+  .then(r => r.json())
+  .then(d => { DATA = d; buildVocabIndex(); init(); })
+  .catch(e => { document.getElementById('status').textContent = 'Error: ' + e; });
+
+// --- Vocab lookup ---
+let vocabIndex = {};
+
+function buildVocabIndex() {
+  for (let i = 0; i < DATA.vocab.length; i++) {
+    vocabIndex[DATA.vocab[i]] = i;
+  }
+}
+
+function getWordEmbedding(word) {
+  word = word.trim().toLowerCase();
+  if (vocabIndex[word] !== undefined) {
+    return DATA.word_embeddings[vocabIndex[word]];
+  }
+  return null;
+}
+
+// --- Linear algebra ---
+function norm(v) { let s=0; for(let i=0;i<v.length;i++) s+=v[i]*v[i]; return Math.sqrt(s); }
+function dot(a,b) { let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s; }
+
+function orthogonalize(u, v) {
+  const d=u.length; let nu=norm(u); u=u.map(x=>x/nu);
+  let dv=dot(v,u); v=v.map((x,i)=>x-dv*u[i]); let nv=norm(v); v=v.map(x=>x/nv);
+  let b=[]; for(let i=0;i<d;i++) b.push([u[i],v[i]]); return b;
+}
+
+function lerpBasis(a,b,t) {
+  const d=a.length; let u=[],v=[];
+  for(let i=0;i<d;i++){u.push((1-t)*a[i][0]+t*b[i][0]);v.push((1-t)*a[i][1]+t*b[i][1]);}
+  return orthogonalize(u,v);
+}
+
+function copyBasis(b) { return b.map(r=>[r[0],r[1]]); }
+function getPrivBasis() { return DATA.bases[DATA.privileged_index].map(r=>[r[0],r[1]]); }
+function getBasis(i) { return DATA.bases[i].map(r=>[r[0],r[1]]); }
+
+function computeAlignment(basisA, basisB) {
+  const u1=basisA.map(r=>r[0]),v1=basisA.map(r=>r[1]);
+  const u2=basisB.map(r=>r[0]),v2=basisB.map(r=>r[1]);
+  const m00=dot(u1,u2),m01=dot(u1,v2),m10=dot(v1,u2),m11=dot(v1,v2);
+  return Math.min(1,Math.sqrt(m00*m00+m01*m01+m10*m10+m11*m11)/Math.sqrt(2));
+}
+
+function randomBasis(d) {
+  let u=Array.from({length:d},()=>Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random()));
+  let v=Array.from({length:d},()=>Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random()));
+  return orthogonalize(u,v);
+}
+
+// --- Concept direction from word lists ---
+function conceptDirection(posWords, negWords) {
+  const d = DATA.ambient_dim;
+  let pos = new Array(d).fill(0);
+  let neg = new Array(d).fill(0);
+  let posCount = 0, negCount = 0;
+  let matchedPos = [], matchedNeg = [];
+
+  for (const w of posWords) {
+    const emb = getWordEmbedding(w);
+    if (emb) { for(let i=0;i<d;i++) pos[i]+=emb[i]; posCount++; matchedPos.push(w); }
+  }
+  for (const w of negWords) {
+    const emb = getWordEmbedding(w);
+    if (emb) { for(let i=0;i<d;i++) neg[i]+=emb[i]; negCount++; matchedNeg.push(w); }
+  }
+
+  if (posCount === 0 && negCount === 0) return { dir: null, matched: [], unmatched: posWords.concat(negWords) };
+
+  if (posCount > 0) pos = pos.map(x => x / posCount);
+  if (negCount > 0) neg = neg.map(x => x / negCount);
+
+  let dir = pos.map((x, i) => x - neg[i]);
+  let n = norm(dir);
+  if (n < 1e-8) return { dir: null, matched: matchedPos.concat(matchedNeg), unmatched: [] };
+  dir = dir.map(x => x / n);
+
+  const allWords = posWords.concat(negWords);
+  const unmatched = allWords.filter(w => !getWordEmbedding(w));
+
+  return { dir, matched: matchedPos.concat(matchedNeg), unmatched };
+}
+
+function parseWords(str) {
+  return str.split(/[,;\s]+/).map(w => w.trim().toLowerCase()).filter(w => w.length > 0);
+}
+
+// --- UI handlers ---
+function onProject() {
+  const pos1 = parseWords(document.getElementById('pos1').value);
+  const neg1 = parseWords(document.getElementById('neg1').value);
+  const pos2 = parseWords(document.getElementById('pos2').value);
+  const neg2 = parseWords(document.getElementById('neg2').value);
+
+  const r1 = conceptDirection(pos1, neg1);
+  const r2 = conceptDirection(pos2, neg2);
+
+  if (!r1.dir && !r2.dir) {
+    setStatus('No matching words found in vocabulary');
+    return;
+  }
+
+  // Build basis
+  let basis;
+  if (r1.dir && r2.dir) {
+    basis = orthogonalize(r1.dir, r2.dir);
+  } else if (r1.dir) {
+    // Only axis 1 — use a random orthogonal for axis 2
+    let rand = Array.from({length:DATA.ambient_dim},()=>Math.random()-0.5);
+    let dp = dot(rand, r1.dir); rand = rand.map((x,i)=>x-dp*r1.dir[i]);
+    let n=norm(rand); rand=rand.map(x=>x/n);
+    basis = orthogonalize(r1.dir, rand);
+  } else {
+    let rand = Array.from({length:DATA.ambient_dim},()=>Math.random()-0.5);
+    let dp = dot(rand, r2.dir); rand = rand.map((x,i)=>x-dp*r2.dir[i]);
+    let n=norm(rand); rand=rand.map(x=>x/n);
+    basis = orthogonalize(rand, r2.dir);
+  }
+
+  animateTo(basis, 600);
+
+  // Show matched/unmatched
+  const allMatched = r1.matched.concat(r2.matched);
+  const allUnmatched = r1.unmatched.concat(r2.unmatched);
+  let html = allMatched.map(w => `<span class="match">${w}</span>`).join(' ');
+  if (allUnmatched.length > 0) {
+    html += ' ' + allUnmatched.map(w => `<span class="no-match">${w}?</span>`).join(' ');
+  }
+  document.getElementById('matched-words').innerHTML = html;
+
+  setStatus(`Projected — ${allMatched.length} words matched`);
+}
+
+function init() {
+  resize();
+  window.addEventListener('resize', resize);
+  currentBasis = randomBasis(DATA.ambient_dim);
+
+  document.getElementById('btn-project').addEventListener('click', onProject);
+
+  // Enter key in any input triggers project
+  for (const id of ['pos1','neg1','pos2','neg2']) {
+    document.getElementById(id).addEventListener('keydown', e => { if(e.key==='Enter') onProject(); });
+  }
+
+  // Presets
+  document.getElementById('pre-exact').addEventListener('click', () => {
+    document.getElementById('pos1').value = 'cold, frozen, ice, winter, arctic';
+    document.getElementById('neg1').value = 'warm, hot, fire, summer, tropical';
+    document.getElementById('pos2').value = 'mechanical, industrial, machine, metal, robotic';
+    document.getElementById('neg2').value = 'organic, natural, living, plant, biological';
+    onProject();
+  });
+  document.getElementById('pre-synonym').addEventListener('click', () => {
+    document.getElementById('pos1').value = 'freezing, icy, frost';
+    document.getElementById('neg1').value = 'boiling, scorching, heat';
+    document.getElementById('pos2').value = 'robotic, automated, engine';
+    document.getElementById('neg2').value = 'alive, growing, forest';
+    onProject();
+  });
+  document.getElementById('pre-wrong').addEventListener('click', () => {
+    document.getElementById('pos1').value = 'happy, bright, fast';
+    document.getElementById('neg1').value = 'sad, dark, slow';
+    document.getElementById('pos2').value = 'guitar, piano, drum';
+    document.getElementById('neg2').value = 'king, queen, castle';
+    onProject();
+  });
+  document.getElementById('pre-random').addEventListener('click', () => {
+    animateTo(randomBasis(DATA.ambient_dim), 500);
+    setStatus('Random projection');
+    document.getElementById('matched-words').innerHTML = '';
+  });
+  document.getElementById('pre-reveal').addEventListener('click', () => {
+    document.getElementById('pos1').value = DATA.privileged_concepts[0].positive.join(', ');
+    document.getElementById('neg1').value = DATA.privileged_concepts[0].negative.join(', ');
+    document.getElementById('pos2').value = DATA.privileged_concepts[1].positive.join(', ');
+    document.getElementById('neg2').value = DATA.privileged_concepts[1].negative.join(', ');
+    onProject();
+  });
+
+  // Cycle decoys
+  let cycling = false, cycleIdx = 0;
+  document.getElementById('btn-cycle').addEventListener('click', () => {
+    cycling = !cycling;
+    if (cycling) cycleNext();
+  });
+  function cycleNext() {
+    if (!cycling) return;
+    const idx = cycleIdx % DATA.n_images;
+    animateTo(getBasis(idx), 1000);
+    setStatus(`"${DATA.labels[idx]}" ${idx===DATA.privileged_index?'— INTENDED':'— decoy'}`);
+    cycleIdx++;
+    setTimeout(cycleNext, 2500);
+  }
+
+  setStatus('Type concept pairs and hit Project — or try a preset');
+  requestAnimationFrame(loop);
+}
+
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  const size = Math.min(wrap.clientWidth - 16, wrap.clientHeight - 16, 760);
+  canvas.width = size * devicePixelRatio;
+  canvas.height = size * devicePixelRatio;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+
+// --- Projection & rendering ---
+function project(basis) {
+  const pts=DATA.points,n=pts.length,d=DATA.ambient_dim;
+  const out=new Float32Array(n*2);
+  for(let i=0;i<n;i++){let x=0,y=0;const row=pts[i];for(let j=0;j<d;j++){x+=row[j]*basis[j][0];y+=row[j]*basis[j][1];}out[i*2]=x;out[i*2+1]=y;}
+  return out;
+}
+
+function draw(projected) {
+  const w=canvas.width/devicePixelRatio, h=canvas.height/devicePixelRatio, n=DATA.n_points;
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,w,h);
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+  for(let i=0;i<n;i++){const px=projected[i*2],py=projected[i*2+1];if(px<xmin)xmin=px;if(px>xmax)xmax=px;if(py<ymin)ymin=py;if(py>ymax)ymax=py;}
+  const span=Math.max(xmax-xmin,ymax-ymin)*1.15;
+  const cx=(xmin+xmax)/2,cy=(ymin+ymax)/2;
+  const drawSize=Math.min(w,h)-80, sc=drawSize/span, ox=w/2, oy=h/2;
+  const r=Math.round(40+warmth*215),g=Math.round(80+(1-warmth)*50-warmth*40),b=Math.round(255-warmth*200);
+  const bc=`rgba(${r},${g},${b},`;
+  const ps=w>500?2.2:1.4;
+  for(let i=0;i<n;i++){
+    const sx=ox+(projected[i*2]-cx)*sc, sy=oy+(projected[i*2+1]-cy)*sc;
+    ctx.fillStyle=bc+'0.65)'; ctx.fillRect(sx-ps/2,sy-ps/2,ps,ps);
+  }
+}
+
+function animateTo(target,dur) {
+  animFromBasis=copyBasis(currentBasis); animToBasis=copyBasis(target);
+  animStart=performance.now(); animDuration=dur||600; animating=true;
+}
+
+function loop(time) {
+  if (!DATA) { requestAnimationFrame(loop); return; }
+  if (animating) {
+    let t=Math.min(1,(time-animStart)/animDuration);
+    t=t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+    currentBasis=lerpBasis(animFromBasis,animToBasis,t);
+    if(t>=1){animating=false;currentBasis=copyBasis(animToBasis);}
+  }
+  warmth = computeAlignment(currentBasis, getPrivBasis());
+  updateAlignDisplay();
+  draw(project(currentBasis));
+  requestAnimationFrame(loop);
+}
+
+function updateAlignDisplay() {
+  const pct = Math.round(warmth * 100);
+  const el = document.getElementById('align-val');
+  el.textContent = pct + '%';
+  if (warmth > 0.8) el.style.color = '#ff4444';
+  else if (warmth > 0.4) el.style.color = '#ffaa44';
+  else el.style.color = '#4488ff';
+
+  const fill = document.getElementById('align-fill');
+  fill.style.width = pct + '%';
+  if(warmth<0.5){const t=warmth/0.5;fill.style.background=`rgb(${Math.round(50+t*205)},${Math.round(50+t*100)},${Math.round(150-t*100)})`;}
+  else{const t=(warmth-0.5)/0.5;fill.style.background=`rgb(255,${Math.round(150-t*110)},${Math.round(50-t*50)})`;}
+}
+
+function setStatus(m) { document.getElementById('status').textContent = m; }
+</script>
+</body>
+</html>
