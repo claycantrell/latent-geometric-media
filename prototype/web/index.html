@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Latent Anamorph</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000; color: #fff;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    overflow: hidden; height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  #header { padding: 12px 0 4px; text-align: center; z-index: 10; }
+  #header h1 { font-size: 16px; font-weight: 400; letter-spacing: 4px; text-transform: uppercase; color: #888; }
+  #status { margin-top: 4px; font-size: 12px; color: #555; height: 16px; }
+
+  #main { flex: 1; display: flex; width: 100%; min-height: 0; }
+  #canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
+  canvas { border: 1px solid #1a1a1a; cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+
+  #side-panel {
+    width: 220px; padding: 16px 20px; display: flex; flex-direction: column; gap: 20px;
+    border-left: 1px solid #1a1a1a;
+  }
+  #side-panel h2 { font-size: 11px; color: #555; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 2px; }
+
+  .angle-control { display: flex; flex-direction: column; gap: 6px; }
+  .angle-header { display: flex; justify-content: space-between; align-items: baseline; }
+  .angle-name { font-size: 12px; color: #888; }
+  .angle-value { font-size: 11px; color: #ff4444; font-variant-numeric: tabular-nums; }
+
+  input[type="range"] {
+    -webkit-appearance: none; width: 100%; height: 6px;
+    background: #1a1a1a; border-radius: 3px; outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px;
+    border-radius: 50%; background: #ff4444; cursor: pointer;
+    border: 2px solid #000; box-shadow: 0 0 8px rgba(255,68,68,0.4);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px; height: 16px; border-radius: 50%; background: #ff4444;
+    cursor: pointer; border: 2px solid #000;
+  }
+
+  .angle-bar-bg {
+    height: 4px; background: #111; border-radius: 2px; overflow: hidden;
+  }
+  .angle-bar-fill {
+    height: 100%; border-radius: 2px; transition: width 0.15s;
+  }
+
+  #explore-note {
+    font-size: 10px; color: #333; line-height: 1.5; margin-top: auto;
+  }
+
+  #controls {
+    padding: 10px 0 16px; display: flex; gap: 10px; align-items: center;
+    flex-wrap: wrap; justify-content: center; z-index: 10;
+  }
+  button {
+    background: #111; color: #aaa; border: 1px solid #333;
+    padding: 8px 18px; font-family: inherit; font-size: 12px;
+    letter-spacing: 1px; cursor: pointer; border-radius: 4px; transition: all 0.2s;
+  }
+  button:hover { background: #1a1a1a; color: #fff; border-color: #555; }
+  button.active { border-color: #ff4444; color: #ff4444; }
+
+  #warmth-wrap { display: flex; align-items: center; gap: 6px; margin-left: 8px; }
+  #warmth-bar-outer { width: 100px; height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden; }
+  #warmth-bar-inner { height: 100%; width: 0%; border-radius: 3px; transition: width 0.2s, background 0.2s; background: #335; }
+  #warmth-label { font-size: 11px; color: #555; min-width: 32px; }
+
+  #view-label {
+    position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%);
+    font-size: 28px; font-weight: 700; letter-spacing: 6px;
+    opacity: 0; transition: opacity 0.5s; pointer-events: none;
+    text-shadow: 0 0 30px currentColor;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Latent Anamorph</h1>
+  <div id="status">loading...</div>
+</div>
+
+<div id="main">
+  <div id="canvas-wrap"><canvas id="c"></canvas></div>
+  <div id="side-panel">
+    <h2>Principal Angles</h2>
+    <div class="angle-control">
+      <div class="angle-header">
+        <span class="angle-name">Angle 1</span>
+        <span class="angle-value" id="a1-val">0.0°</span>
+      </div>
+      <input type="range" id="slider1" min="0" max="1000" value="0">
+      <div class="angle-bar-bg"><div class="angle-bar-fill" id="a1-bar" style="width:0%;background:#ff4444"></div></div>
+    </div>
+    <div class="angle-control">
+      <div class="angle-header">
+        <span class="angle-name">Angle 2</span>
+        <span class="angle-value" id="a2-val">0.0°</span>
+      </div>
+      <input type="range" id="slider2" min="0" max="1000" value="0">
+      <div class="angle-bar-bg"><div class="angle-bar-fill" id="a2-bar" style="width:0%;background:#ff6644"></div></div>
+    </div>
+
+    <div style="border-top:1px solid #1a1a1a; padding-top:12px;">
+      <h2>Total Alignment</h2>
+      <div class="angle-header" style="margin-top:6px;">
+        <span class="angle-name">Warmth</span>
+        <span class="angle-value" id="align-pct">0%</span>
+      </div>
+      <div class="angle-bar-bg" style="height:8px;margin-top:6px;">
+        <div class="angle-bar-fill" id="align-bar" style="width:0%;background:#335;height:100%"></div>
+      </div>
+    </div>
+
+    <div id="explore-note">
+      <strong style="color:#555">How it works:</strong><br>
+      Two independent rotations connect any view to the hidden form.
+      Slide both to max to reveal it. They never interfere.<br><br>
+      <strong style="color:#555">Drag</strong> to explore freely (resets sliders).
+      <strong style="color:#555">Random</strong> picks a new starting point.
+    </div>
+  </div>
+</div>
+
+<div id="view-label"></div>
+
+<div id="controls">
+  <button id="btn-random">Random</button>
+  <button id="btn-hint">Hint</button>
+  <button id="btn-reveal">Reveal</button>
+  <button id="btn-cycle">Cycle All</button>
+</div>
+
+<script>
+let DATA = null;
+let currentBasis = null;
+let warmth = 0;
+let animating = false, animStart = 0, animDuration = 600;
+let animFromBasis = null, animToBasis = null;
+
+// Drag state
+let dragging = false, dragStartX = 0, dragStartY = 0, dragBasisSnapshot = null;
+let dragPerturbU = null, dragPerturbV = null;
+
+// Principal angle decomposition (computed once per "starting position")
+let decomp = null; // {aCanon, bCanon, theta1, theta2, plane1, plane2}
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const slider1 = document.getElementById('slider1');
+const slider2 = document.getElementById('slider2');
+
+fetch('data.json')
+  .then(r => r.json())
+  .then(d => { DATA = d; init(); })
+  .catch(e => { document.getElementById('status').textContent = 'Error: ' + e; });
+
+function init() {
+  resize();
+  window.addEventListener('resize', resize);
+  currentBasis = randomBasis(DATA.ambient_dim);
+  warmth = 0;
+
+  computeDecomposition();
+
+  slider1.addEventListener('input', onSlider);
+  slider2.addEventListener('input', onSlider);
+  document.getElementById('btn-random').addEventListener('click', onRandom);
+  document.getElementById('btn-hint').addEventListener('click', onHint);
+  document.getElementById('btn-reveal').addEventListener('click', onReveal);
+  document.getElementById('btn-cycle').addEventListener('click', onCycle);
+
+  canvas.addEventListener('mousedown', onDragStart);
+  window.addEventListener('mousemove', onDragMove);
+  window.addEventListener('mouseup', onDragEnd);
+  canvas.addEventListener('touchstart', e=>{if(e.touches.length===1)onDragStart({clientX:e.touches[0].clientX,clientY:e.touches[0].clientY,preventDefault:()=>e.preventDefault()});},{passive:false});
+  window.addEventListener('touchmove', e=>{if(dragging&&e.touches.length===1){e.preventDefault();onDragMove({clientX:e.touches[0].clientX,clientY:e.touches[0].clientY});}},{passive:false});
+  window.addEventListener('touchend', onDragEnd);
+
+  updateStatus('Slide both angles to max to find the hidden form');
+  updateAll();
+  requestAnimationFrame(loop);
+}
+
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  const size = Math.min(wrap.clientWidth - 16, wrap.clientHeight - 16, 760);
+  canvas.width = size * devicePixelRatio;
+  canvas.height = size * devicePixelRatio;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+
+// --- Linear algebra ---
+function randVec(d) { return Array.from({length:d}, ()=>randn()); }
+function randn() { return Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random()); }
+function norm(v) { let s=0; for(let i=0;i<v.length;i++) s+=v[i]*v[i]; return Math.sqrt(s); }
+function dot(a,b) { let s=0; for(let i=0;i<a.length;i++) s+=a[i]*b[i]; return s; }
+function scale(v,s) { return v.map(x=>x*s); }
+function add(a,b) { return a.map((x,i)=>x+b[i]); }
+function sub(a,b) { return a.map((x,i)=>x-b[i]); }
+
+function randomBasis(d) { return orthogonalize(randVec(d), randVec(d)); }
+
+function orthogonalize(u, v) {
+  const d=u.length; let nu=norm(u); u=u.map(x=>x/nu);
+  let dv=dot(v,u); v=v.map((x,i)=>x-dv*u[i]); let nv=norm(v); v=v.map(x=>x/nv);
+  let b=[]; for(let i=0;i<d;i++) b.push([u[i],v[i]]); return b;
+}
+function lerpBasis(a,b,t) {
+  const d=a.length; let u=[],v=[];
+  for(let i=0;i<d;i++){u.push((1-t)*a[i][0]+t*b[i][0]);v.push((1-t)*a[i][1]+t*b[i][1]);}
+  return orthogonalize(u,v);
+}
+function copyBasis(b) { return b.map(r=>[r[0],r[1]]); }
+function getPrivilegedBasis() { return DATA.bases[DATA.privileged_index].map(r=>[r[0],r[1]]); }
+function getBasis(idx) { return DATA.bases[idx].map(r=>[r[0],r[1]]); }
+
+function computeAlignment(basis) {
+  const u=basis.map(r=>r[0]),v=basis.map(r=>r[1]);
+  const eb=DATA.bases[DATA.privileged_index];
+  const eu=eb.map(r=>r[0]),ev=eb.map(r=>r[1]);
+  const m00=dot(u,eu),m01=dot(u,ev),m10=dot(v,eu),m11=dot(v,ev);
+  return Math.min(1,Math.sqrt(m00*m00+m01*m01+m10*m10+m11*m11)/Math.sqrt(2));
+}
+
+// --- Principal angle decomposition ---
+// Decomposes the rotation from current basis to target into two independent
+// rotations in orthogonal planes. Adjusting one never affects the other.
+
+function computeDecomposition() {
+  const target = getPrivilegedBasis();
+  const A0 = currentBasis.map(r=>r[0]); // current u
+  const A1 = currentBasis.map(r=>r[1]); // current v
+  const B0 = target.map(r=>r[0]);       // target u
+  const B1 = target.map(r=>r[1]);       // target v
+
+  // M = A^T B (2x2)
+  const m00 = dot(A0, B0), m01 = dot(A0, B1);
+  const m10 = dot(A1, B0), m11 = dot(A1, B1);
+
+  // SVD of 2x2 matrix M = U S V^T
+  const svd = svd2x2(m00, m01, m10, m11);
+
+  // Canonical current basis vectors (rotated within current subspace by U)
+  const aC0 = add(scale(A0, svd.u00), scale(A1, svd.u10));
+  const aC1 = add(scale(A0, svd.u01), scale(A1, svd.u11));
+
+  // Canonical target basis vectors (rotated within target subspace by V)
+  const bC0 = add(scale(B0, svd.v00), scale(B1, svd.v10));
+  const bC1 = add(scale(B0, svd.v01), scale(B1, svd.v11));
+
+  // Principal angles
+  const theta1 = Math.acos(Math.min(1, Math.max(-1, svd.s0)));
+  const theta2 = Math.acos(Math.min(1, Math.max(-1, svd.s1)));
+
+  // Perpendicular directions in each rotation plane
+  // p0 = (bC0 - s0 * aC0) / sin(theta1)
+  let p0, p1;
+  if (theta1 > 1e-6) {
+    p0 = sub(bC0, scale(aC0, svd.s0));
+    let np0 = norm(p0);
+    p0 = np0 > 1e-8 ? scale(p0, 1/np0) : randVec(DATA.ambient_dim);
+  } else {
+    p0 = randVec(DATA.ambient_dim); // already aligned
+  }
+
+  if (theta2 > 1e-6) {
+    p1 = sub(bC1, scale(aC1, svd.s1));
+    let np1 = norm(p1);
+    p1 = np1 > 1e-8 ? scale(p1, 1/np1) : randVec(DATA.ambient_dim);
+  } else {
+    p1 = randVec(DATA.ambient_dim);
+  }
+
+  decomp = { aC0, aC1, p0, p1, theta1, theta2 };
+
+  // Reset sliders
+  slider1.value = 0;
+  slider2.value = 0;
+}
+
+// Reconstruct basis from slider values
+function basisFromSliders(t1, t2) {
+  const th1 = t1 * decomp.theta1;
+  const th2 = t2 * decomp.theta2;
+
+  // Rotate aC0 toward bC0 by th1 in plane(aC0, p0)
+  const new0 = add(scale(decomp.aC0, Math.cos(th1)), scale(decomp.p0, Math.sin(th1)));
+
+  // Rotate aC1 toward bC1 by th2 in plane(aC1, p1)
+  const new1 = add(scale(decomp.aC1, Math.cos(th2)), scale(decomp.p1, Math.sin(th2)));
+
+  return orthogonalize(new0, new1);
+}
+
+// 2x2 SVD: M = U S V^T
+function svd2x2(a, b, c, d) {
+  // Using the analytical formula
+  const s1 = a*a + b*b + c*c + d*d;
+  const s2 = Math.sqrt(Math.pow(a*a + b*b - c*c - d*d, 2) + 4*Math.pow(a*c + b*d, 2));
+
+  const sig1 = Math.sqrt(Math.max(0, (s1 + s2) / 2));
+  const sig2 = Math.sqrt(Math.max(0, (s1 - s2) / 2));
+
+  // Compute U and V via atan2
+  const theta = 0.5 * Math.atan2(2*(a*c + b*d), a*a + b*b - c*c - d*d);
+  const phi = 0.5 * Math.atan2(2*(a*b + c*d), a*a - b*b + c*c - d*d);
+
+  const ct = Math.cos(theta), st = Math.sin(theta);
+  const cp = Math.cos(phi), sp = Math.sin(phi);
+
+  // U = [[ct, -st], [st, ct]]
+  // But we need to handle sign corrections for proper SVD
+  // Use a simpler approach: compute M^T M and M M^T
+
+  // M^T M
+  const mtm00 = a*a + c*c, mtm01 = a*b + c*d;
+  const mtm10 = mtm01, mtm11 = b*b + d*d;
+
+  // Eigendecomposition of 2x2 symmetric
+  const ev1 = eigenDecomp2x2Sym(mtm00, mtm01, mtm11);
+
+  // V = eigenvectors of M^T M
+  const v00 = ev1.v1x, v10 = ev1.v1y;
+  const v01 = ev1.v2x, v11 = ev1.v2y;
+
+  // U columns = M V / sigma
+  let u00, u10, u01, u11;
+  if (sig1 > 1e-10) {
+    u00 = (a*v00 + b*v10) / sig1;
+    u10 = (c*v00 + d*v10) / sig1;
+  } else {
+    u00 = 1; u10 = 0;
+  }
+  if (sig2 > 1e-10) {
+    u01 = (a*v01 + b*v11) / sig2;
+    u11 = (c*v01 + d*v11) / sig2;
+  } else {
+    // Orthogonal to first column
+    u01 = -u10; u11 = u00;
+  }
+
+  return { u00, u01, u10, u11, s0: sig1, s1: sig2, v00, v01, v10, v11 };
+}
+
+function eigenDecomp2x2Sym(a, b, d) {
+  // Symmetric matrix [[a, b], [b, d]]
+  const tr = a + d;
+  const det = a * d - b * b;
+  const disc = Math.sqrt(Math.max(0, tr*tr/4 - det));
+  const l1 = tr/2 + disc;
+  const l2 = tr/2 - disc;
+
+  let v1x, v1y, v2x, v2y;
+  if (Math.abs(b) > 1e-10) {
+    v1x = l1 - d; v1y = b;
+    let n1 = Math.sqrt(v1x*v1x + v1y*v1y);
+    v1x /= n1; v1y /= n1;
+    v2x = -v1y; v2y = v1x;
+  } else {
+    v1x = 1; v1y = 0; v2x = 0; v2y = 1;
+  }
+  return { l1, l2, v1x, v1y, v2x, v2y };
+}
+
+// --- Sliders ---
+function onSlider() {
+  if (animating || !decomp) return;
+  const t1 = slider1.value / 1000;
+  const t2 = slider2.value / 1000;
+  currentBasis = basisFromSliders(t1, t2);
+  warmth = computeAlignment(currentBasis);
+  updateAll();
+  checkFound();
+}
+
+// --- Drag (free exploration — resets decomposition after) ---
+function randomPerturbation(basis) {
+  const d=basis.length, u=basis.map(r=>r[0]), v=basis.map(r=>r[1]);
+  let p=randVec(d); let du=dot(p,u),dv=dot(p,v);
+  p=p.map((x,i)=>x-du*u[i]-dv*v[i]); let np=norm(p);
+  return p.map(x=>x/np);
+}
+function rotateBasisVec(bv,dir,theta) {
+  let r=[]; for(let i=0;i<bv.length;i++) r.push(Math.cos(theta)*bv[i]+Math.sin(theta)*dir[i]);
+  return r;
+}
+
+function onDragStart(e) {
+  if (animating) return;
+  dragging = true; canvas.classList.add('dragging');
+  dragStartX = e.clientX; dragStartY = e.clientY;
+  dragBasisSnapshot = copyBasis(currentBasis);
+  dragPerturbU = randomPerturbation(currentBasis);
+  dragPerturbV = randomPerturbation(currentBasis);
+  hideLabel(); e.preventDefault();
+}
+function onDragMove(e) {
+  if (!dragging) return;
+  const dx = (e.clientX - dragStartX) * 0.008;
+  const dy = (e.clientY - dragStartY) * 0.008;
+  let u0 = dragBasisSnapshot.map(r=>r[0]);
+  let v0 = dragBasisSnapshot.map(r=>r[1]);
+  currentBasis = orthogonalize(rotateBasisVec(u0,dragPerturbU,dx), rotateBasisVec(v0,dragPerturbV,dy));
+  warmth = computeAlignment(currentBasis);
+  updateAll();
+}
+function onDragEnd() {
+  if (!dragging) return;
+  dragging = false; canvas.classList.remove('dragging');
+  // Recompute decomposition from new position
+  computeDecomposition();
+  updateAll();
+  checkFound();
+}
+
+function checkFound() {
+  if (warmth > 0.95) {
+    updateStatus('You found it!');
+    showLabel(DATA.labels[DATA.privileged_index], '#ff4444');
+  } else if (warmth > 0.75) {
+    updateStatus('Very close! ' + Math.round(warmth*100) + '%');
+  } else {
+    updateStatus('Alignment: ' + Math.round(warmth*100) + '%');
+  }
+}
+
+// --- Projection & Rendering ---
+function project(basis) {
+  const pts=DATA.points,n=pts.length,d=DATA.ambient_dim;
+  const out=new Float32Array(n*2);
+  for(let i=0;i<n;i++){let x=0,y=0;const row=pts[i];for(let j=0;j<d;j++){x+=row[j]*basis[j][0];y+=row[j]*basis[j][1];}out[i*2]=x;out[i*2+1]=y;}
+  return out;
+}
+
+function draw(projected) {
+  const w=canvas.width/devicePixelRatio, h=canvas.height/devicePixelRatio, n=DATA.n_points;
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,w,h);
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+  for(let i=0;i<n;i++){const px=projected[i*2],py=projected[i*2+1];if(px<xmin)xmin=px;if(px>xmax)xmax=px;if(py<ymin)ymin=py;if(py>ymax)ymax=py;}
+  const span=Math.max(xmax-xmin,ymax-ymin)*1.15;
+  const cx=(xmin+xmax)/2,cy=(ymin+ymax)/2;
+  const drawSize=Math.min(w,h)-80, sc=drawSize/span, ox=w/2, oy=h/2;
+  const r=Math.round(40+warmth*215),g=Math.round(80+(1-warmth)*50-warmth*40),b=Math.round(255-warmth*200);
+  const bc=`rgba(${r},${g},${b},`;
+  const ps=w>500?2.0:1.4;
+  for(let i=0;i<n;i++){
+    const sx=ox+(projected[i*2]-cx)*sc, sy=oy+(projected[i*2+1]-cy)*sc;
+    ctx.fillStyle=bc+'0.65)'; ctx.fillRect(sx-ps/2,sy-ps/2,ps,ps);
+  }
+}
+
+// --- Animation loop ---
+function loop(time) {
+  if (!DATA) { requestAnimationFrame(loop); return; }
+  if (animating) {
+    let t=Math.min(1,(time-animStart)/animDuration);
+    t=t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+    currentBasis=lerpBasis(animFromBasis,animToBasis,t);
+    warmth=computeAlignment(currentBasis); updateAll();
+    if(t>=1){animating=false;currentBasis=copyBasis(animToBasis);computeDecomposition();updateAll();checkFound();}
+  }
+  draw(project(currentBasis));
+  requestAnimationFrame(loop);
+}
+
+// --- Buttons ---
+function animateTo(target,dur){animFromBasis=copyBasis(currentBasis);animToBasis=copyBasis(target);animStart=performance.now();animDuration=dur||600;animating=true;}
+function onRandom(){cycling=false;document.getElementById('btn-cycle').classList.remove('active');animateTo(randomBasis(DATA.ambient_dim),500);updateStatus('New starting point — use sliders to find the form');hideLabel();}
+function onHint(){cycling=false;document.getElementById('btn-cycle').classList.remove('active');animateTo(lerpBasis(currentBasis,getPrivilegedBasis(),0.3),700);updateStatus('Hint — getting warmer');}
+function onReveal(){cycling=false;document.getElementById('btn-cycle').classList.remove('active');animateTo(getPrivilegedBasis(),1200);updateStatus('Revealed.');showLabel(DATA.labels[DATA.privileged_index],'#ff4444');}
+let cycling=false,cycleIndex=0;
+function onCycle(){cycling=!cycling;const btn=document.getElementById('btn-cycle');if(cycling){btn.classList.add('active');cycleIndex=0;cycleNext();}else{btn.classList.remove('active');}}
+function cycleNext(){if(!cycling)return;const idx=cycleIndex%DATA.n_images;animateTo(getBasis(idx),1000);const l=DATA.labels[idx],p=idx===DATA.privileged_index;updateStatus(p?`"${l}" — INTENDED`:`"${l}" — decoy`);showLabel(l,p?'#ff4444':'#44ff88');cycleIndex++;setTimeout(cycleNext,2500);}
+
+// --- UI ---
+function updateAll() {
+  // Warmth bar
+  const pct = Math.round(warmth*100);
+  document.getElementById('warmth-label') && (document.getElementById('warmth-label').textContent = pct+'%');
+
+  // Slider readouts
+  if (decomp) {
+    const t1 = slider1.value / 1000;
+    const t2 = slider2.value / 1000;
+    const deg1 = (decomp.theta1 * 180 / Math.PI).toFixed(1);
+    const deg2 = (decomp.theta2 * 180 / Math.PI).toFixed(1);
+    const cur1 = (t1 * decomp.theta1 * 180 / Math.PI).toFixed(1);
+    const cur2 = (t2 * decomp.theta2 * 180 / Math.PI).toFixed(1);
+    document.getElementById('a1-val').textContent = cur1 + '° / ' + deg1 + '°';
+    document.getElementById('a2-val').textContent = cur2 + '° / ' + deg2 + '°';
+    document.getElementById('a1-bar').style.width = (t1*100)+'%';
+    document.getElementById('a2-bar').style.width = (t2*100)+'%';
+  }
+
+  document.getElementById('align-pct').textContent = pct + '%';
+  const bar = document.getElementById('align-bar');
+  bar.style.width = pct + '%';
+  if(warmth<0.5){const t=warmth/0.5;bar.style.background=`rgb(${Math.round(50+t*205)},${Math.round(50+t*100)},${Math.round(150-t*100)})`;}
+  else{const t=(warmth-0.5)/0.5;bar.style.background=`rgb(255,${Math.round(150-t*110)},${Math.round(50-t*50)})`;}
+}
+
+function updateStatus(m){document.getElementById('status').textContent=m;}
+function showLabel(t,c){const e=document.getElementById('view-label');e.textContent=t;e.style.color=c;e.style.opacity=1;}
+function hideLabel(){document.getElementById('view-label').style.opacity=0;}
+</script>
+</body>
+</html>
