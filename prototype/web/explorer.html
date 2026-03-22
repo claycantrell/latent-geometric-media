@@ -15,12 +15,6 @@
   #header { padding: 10px 0 4px; text-align: center; }
   #header h1 { font-size: 15px; font-weight: 400; letter-spacing: 3px; text-transform: uppercase; color: #888; }
   #subtitle { font-size: 11px; color: #444; margin-top: 2px; }
-  #hidden-alert {
-    position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-    font-size: 22px; font-weight: 700; letter-spacing: 4px; color: #ff2222;
-    text-shadow: 0 0 30px #ff2222; opacity: 0; transition: opacity 0.5s;
-    pointer-events: none;
-  }
 
   #main { flex: 1; display: flex; width: 100%; min-height: 0; }
   #canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
@@ -82,14 +76,13 @@
 
 <div id="header">
   <h1>Embedding Explorer</h1>
-  <div id="subtitle">something is hidden in this embedding space — find it with the right concept lens</div>
+  <div id="subtitle">same data, different concept lenses → different structure</div>
 </div>
 
 <div id="main">
   <div id="canvas-wrap">
     <canvas id="c"></canvas>
     <div id="tooltip"><span class="word"></span><br><span class="cat"></span></div>
-    <div id="hidden-alert"></div>
   </div>
   <div id="side-panel">
     <h2>Concept Lens</h2>
@@ -252,12 +245,10 @@ function init() {
     btn.className = 'lens-btn';
     btn.textContent = lens.name;
     btn.addEventListener('click', () => {
-      // Use this lens as axis 1, keep axis 2 as-is (or pair with a different lens)
       document.getElementById('pos1').value = lens.pos.join(', ');
       document.getElementById('neg1').value = lens.neg.join(', ');
-      // Pick a complementary lens for axis 2 (skip self, try to pick something different)
-      const others = DATA.suggested_lenses.filter(l => l.name !== lens.name);
-      const other = others[Math.floor(Math.random() * others.length)];
+      // For second axis, find a complementary suggested lens
+      const other = DATA.suggested_lenses.find(l => l !== lens);
       if (other) {
         document.getElementById('pos2').value = other.pos.join(', ');
         document.getElementById('neg2').value = other.neg.join(', ');
@@ -333,33 +324,12 @@ function resize() {
 // --- Render ---
 let drawParams = {}; // cache for hover
 
-function computeHiddenAlignment() {
-  if (!DATA.hidden_basis || !currentBasis) return 0;
-  const hb = DATA.hidden_basis;
-  const u1=currentBasis.map(r=>r[0]), v1=currentBasis.map(r=>r[1]);
-  const u2=hb.map(r=>r[0]), v2=hb.map(r=>r[1]);
-  const m00=dot(u1,u2),m01=dot(u1,v2),m10=dot(v1,u2),m11=dot(v1,v2);
-  return Math.min(1, Math.sqrt(m00*m00+m01*m01+m10*m10+m11*m11)/Math.sqrt(2));
-}
-
 function draw() {
   const w = canvas.width/devicePixelRatio, h = canvas.height/devicePixelRatio;
   const n = DATA.n_points;
-  const nReal = DATA.n_real || n;
   ctx.fillStyle = '#000'; ctx.fillRect(0,0,w,h);
 
   if (!projected) return;
-
-  const hAlign = computeHiddenAlignment();
-
-  // Update hidden alert
-  const alertEl = document.getElementById('hidden-alert');
-  if (hAlign > 0.75) {
-    alertEl.textContent = 'HIDDEN FORM DETECTED';
-    alertEl.style.opacity = Math.min(1, (hAlign - 0.75) * 4);
-  } else {
-    alertEl.style.opacity = 0;
-  }
 
   let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
   for(let i=0;i<n;i++){
@@ -375,43 +345,25 @@ function draw() {
   const ox=w/2, oy=h/2;
   drawParams = {cx,cy,sc,ox,oy};
 
+  // Draw points with category colors and labels
   ctx.font = '9px monospace';
   ctx.textAlign = 'center';
 
-  // Draw ghost points first (behind real points)
-  // Ghost points become more visible as alignment increases
-  const ghostAlpha = 0.15 + hAlign * 0.6;
-  const ghostSize = 1.5 + hAlign * 2.0;
-  for(let i=nReal;i<n;i++){
-    if(hiddenCategories.has(DATA.categories[i])) continue;
-    const sx=ox+(projected[i*2]-cx)*sc;
-    const sy=oy+(projected[i*2+1]-cy)*sc;
-
-    if (hAlign > 0.4) {
-      ctx.fillStyle = `rgba(255,34,34,${ghostAlpha})`;
-    } else {
-      ctx.fillStyle = `rgba(100,100,100,${ghostAlpha * 0.5})`;
-    }
-    ctx.beginPath();
-    ctx.arc(sx, sy, ghostSize, 0, Math.PI*2);
-    ctx.fill();
-  }
-
-  // Draw real points on top
-  for(let i=0;i<nReal;i++){
+  for(let i=0;i<n;i++){
     if(hiddenCategories.has(DATA.categories[i])) continue;
     const sx=ox+(projected[i*2]-cx)*sc;
     const sy=oy+(projected[i*2+1]-cy)*sc;
     const col = DATA.colors[i];
 
-    ctx.fillStyle = col + 'bb';
+    // Point
+    ctx.fillStyle = col + 'aa';
     ctx.beginPath();
     ctx.arc(sx, sy, 3.5, 0, Math.PI*2);
     ctx.fill();
 
     // Label
-    ctx.fillStyle = col + '77';
-    ctx.fillText(DATA.words[i], sx, sy - 7);
+    ctx.fillStyle = col + '88';
+    ctx.fillText(DATA.words[i], sx, sy - 6);
   }
 
   // Axes
