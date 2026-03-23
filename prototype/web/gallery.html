@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Latent Sculpture Gallery</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000; color: #fff;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    overflow: hidden; height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  #header { padding: 10px 20px 4px; display: flex; justify-content: space-between; align-items: baseline; }
+  #header h1 { font-size: 14px; font-weight: 400; letter-spacing: 3px; text-transform: uppercase; color: #666; }
+  #status { font-size: 11px; color: #444; }
+
+  #main { flex: 1; display: flex; min-height: 0; }
+  #canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; }
+  canvas { cursor: grab; }
+  canvas.dragging { cursor: grabbing; }
+
+  #side {
+    width: 170px; padding: 12px 14px; border-left: 1px solid #111;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  #side h2 { font-size: 10px; color: #444; letter-spacing: 2px; text-transform: uppercase; margin-top: 6px; }
+
+  .shape-btn {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    padding: 5px 8px; font-size: 11px; color: #888;
+    background: #0a0a0a; border: 1px solid #1a1a1a; border-radius: 3px;
+    transition: all 0.15s; width: 100%;
+  }
+  .shape-btn:hover { color: #fff; border-color: #333; }
+  .shape-btn.active { border-color: #555; }
+  .shape-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .shape-name { flex: 1; }
+  .shape-eye {
+    font-size: 9px; opacity: 0.4; cursor: pointer; padding: 0 2px;
+  }
+  .shape-eye.off { opacity: 0.15; }
+
+  button {
+    background: #111; color: #777; border: 1px solid #222;
+    padding: 6px 10px; font-family: inherit; font-size: 10px;
+    cursor: pointer; border-radius: 3px; transition: all 0.15s;
+    width: 100%;
+  }
+  button:hover { color: #fff; border-color: #444; }
+
+  #speed-wrap { display: flex; align-items: center; gap: 6px; }
+  #speed-wrap span { font-size: 9px; color: #444; }
+  input[type="range"] {
+    -webkit-appearance: none; flex: 1; height: 4px;
+    background: #222; border-radius: 2px; outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px;
+    border-radius: 50%; background: #555; cursor: pointer;
+  }
+
+  #info { font-size: 9px; color: #2a2a2a; line-height: 1.5; margin-top: auto; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Latent Sculpture Gallery</h1>
+  <span id="status">loading...</span>
+</div>
+
+<div id="main">
+  <div id="canvas-wrap"><canvas id="c"></canvas></div>
+  <div id="side">
+    <h2>View Shape</h2>
+    <div id="shape-list"></div>
+
+    <h2>Controls</h2>
+    <button id="btn-spin">Auto-spin</button>
+    <button id="btn-random">Random view</button>
+    <div id="speed-wrap">
+      <span>Speed</span>
+      <input type="range" id="spin-speed" min="1" max="20" value="6">
+    </div>
+
+    <div id="info">
+      Click a shape name to snap to its best view.
+      Drag to rotate. Click the eye to hide/show.
+    </div>
+  </div>
+</div>
+
+<script>
+let DATA = null;
+let currentBasis = null;
+let hiddenShapes = new Set();
+
+let dragging = false, dragStartX=0, dragStartY=0, dragSnapshot=null;
+let dragPertU=null, dragPertV=null;
+
+let spinning = false;
+let spinDirs = [];
+let spinSpeedFactor = 6;
+
+let animating=false, animStart=0, animDuration=600, animFrom=null, animTo=null;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+fetch('gallery_data.json')
+  .then(r => r.json())
+  .then(d => { DATA = d; init(); })
+  .catch(e => { document.getElementById('status').textContent = 'Error: ' + e; });
+
+function init() {
+  resize();
+  window.addEventListener('resize', resize);
+
+  // Start snapped to first shape
+  currentBasis = getShapeBasis(0);
+
+  // Build shape list
+  const list = document.getElementById('shape-list');
+  for (let i = 0; i < DATA.shapes.length; i++) {
+    const s = DATA.shapes[i];
+    const el = document.createElement('div');
+    el.className = 'shape-btn';
+    el.innerHTML = `<div class="shape-dot" style="background:${s.color}"></div>
+      <span class="shape-name">${s.name}</span>
+      <span class="shape-eye" data-idx="${i}" title="toggle visibility">&#9679;</span>`;
+
+    // Click shape name → snap to its view
+    el.querySelector('.shape-name').addEventListener('click', () => {
+      spinning = false;
+      document.getElementById('btn-spin').textContent = 'Auto-spin';
+      animateTo(getShapeBasis(i), 800);
+      document.getElementById('status').textContent = s.name;
+      // Highlight
+      list.querySelectorAll('.shape-btn').forEach(b => b.classList.remove('active'));
+      el.classList.add('active');
+    });
+
+    // Click eye → toggle visibility
+    el.querySelector('.shape-eye').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const eye = e.target;
+      if (hiddenShapes.has(i)) {
+        hiddenShapes.delete(i);
+        eye.classList.remove('off');
+      } else {
+        hiddenShapes.add(i);
+        eye.classList.add('off');
+      }
+    });
+
+    list.appendChild(el);
+  }
+
+  // Drag
+  canvas.addEventListener('mousedown', onDragStart);
+  window.addEventListener('mousemove', onDragMove);
+  window.addEventListener('mouseup', onDragEnd);
+  canvas.addEventListener('touchstart', e => {
+    if(e.touches.length===1){e.preventDefault();onDragStart({clientX:e.touches[0].clientX,clientY:e.touches[0].clientY,preventDefault:()=>{}});}
+  },{passive:false});
+  window.addEventListener('touchmove', e => {
+    if(dragging&&e.touches.length===1){e.preventDefault();onDragMove({clientX:e.touches[0].clientX,clientY:e.touches[0].clientY});}
+  },{passive:false});
+  window.addEventListener('touchend', onDragEnd);
+
+  document.getElementById('btn-spin').addEventListener('click', toggleSpin);
+  document.getElementById('btn-random').addEventListener('click', () => animateTo(randomBasis(DATA.ambient_dim), 800));
+  document.getElementById('spin-speed').addEventListener('input', e => { spinSpeedFactor = parseInt(e.target.value); });
+
+  refreshSpinDirs();
+  document.getElementById('status').textContent = DATA.shapes[0].name;
+  requestAnimationFrame(loop);
+}
+
+function getShapeBasis(idx) {
+  return DATA.shapes[idx].basis.map(r => [r[0], r[1]]);
+}
+
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  const size = Math.min(wrap.clientWidth, wrap.clientHeight, 900);
+  canvas.width = size * devicePixelRatio;
+  canvas.height = size * devicePixelRatio;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+
+// --- LA ---
+function randn(){return Math.sqrt(-2*Math.log(Math.random()))*Math.cos(2*Math.PI*Math.random());}
+function norm(v){let s=0;for(let i=0;i<v.length;i++)s+=v[i]*v[i];return Math.sqrt(s);}
+function dot(a,b){let s=0;for(let i=0;i<a.length;i++)s+=a[i]*b[i];return s;}
+function orthogonalize(u,v){
+  const d=u.length;let nu=norm(u);u=u.map(x=>x/nu);
+  let dv=dot(v,u);v=v.map((x,i)=>x-dv*u[i]);let nv=norm(v);v=v.map(x=>x/nv);
+  let b=[];for(let i=0;i<d;i++)b.push([u[i],v[i]]);return b;
+}
+function randomBasis(d){return orthogonalize(Array.from({length:d},()=>randn()),Array.from({length:d},()=>randn()));}
+function copyBasis(b){return b.map(r=>[r[0],r[1]]);}
+function lerpBasis(a,b,t){
+  const d=a.length;let u=[],v=[];
+  for(let i=0;i<d;i++){u.push((1-t)*a[i][0]+t*b[i][0]);v.push((1-t)*a[i][1]+t*b[i][1]);}
+  return orthogonalize(u,v);
+}
+function randomPerturbation(basis){
+  const d=basis.length;const u=basis.map(r=>r[0]),v=basis.map(r=>r[1]);
+  let p=Array.from({length:d},()=>randn());
+  let du=dot(p,u),dv=dot(p,v);p=p.map((x,i)=>x-du*u[i]-dv*v[i]);
+  let np=norm(p);return p.map(x=>x/np);
+}
+function rotateBasisVec(bv,dir,theta){return bv.map((x,i)=>Math.cos(theta)*x+Math.sin(theta)*dir[i]);}
+
+// --- Drag ---
+function onDragStart(e){
+  if(animating)return;
+  spinning=false;document.getElementById('btn-spin').textContent='Auto-spin';
+  dragging=true;canvas.classList.add('dragging');
+  dragStartX=e.clientX;dragStartY=e.clientY;
+  dragSnapshot=copyBasis(currentBasis);
+  dragPertU=randomPerturbation(currentBasis);
+  dragPertV=randomPerturbation(currentBasis);
+  e.preventDefault();
+}
+function onDragMove(e){
+  if(!dragging)return;
+  const dx=(e.clientX-dragStartX)*0.006;
+  const dy=(e.clientY-dragStartY)*0.006;
+  const u0=dragSnapshot.map(r=>r[0]),v0=dragSnapshot.map(r=>r[1]);
+  currentBasis=orthogonalize(rotateBasisVec(u0,dragPertU,dx),rotateBasisVec(v0,dragPertV,dy));
+}
+function onDragEnd(){if(!dragging)return;dragging=false;canvas.classList.remove('dragging');}
+
+// --- Spin ---
+function refreshSpinDirs(){spinDirs=[];for(let i=0;i<4;i++)spinDirs.push(randomPerturbation(currentBasis));}
+function toggleSpin(){
+  spinning=!spinning;
+  document.getElementById('btn-spin').textContent=spinning?'Stop':'Auto-spin';
+  if(spinning)refreshSpinDirs();
+}
+function applySpin(dt){
+  if(!spinning||dragging||animating)return;
+  const speed=spinSpeedFactor*0.0003*dt;
+  const t=performance.now()*0.001;
+  const u=currentBasis.map(r=>r[0]),v=currentBasis.map(r=>r[1]);
+  let uNew=u.slice(),vNew=v.slice();
+  for(let k=0;k<4;k++){
+    const angle=Math.sin(t*(0.3+k*0.17)+k*1.7)*speed*(k<2?1:0.5);
+    if(k<2)uNew=rotateBasisVec(uNew,spinDirs[k],angle);
+    else vNew=rotateBasisVec(vNew,spinDirs[k],angle);
+  }
+  currentBasis=orthogonalize(uNew,vNew);
+  if(Math.random()<0.003)refreshSpinDirs();
+}
+
+// --- Animation ---
+function animateTo(target,dur){animFrom=copyBasis(currentBasis);animTo=copyBasis(target);animStart=performance.now();animDuration=dur||600;animating=true;}
+
+// --- Loop ---
+let lastTime=0;
+function loop(time){
+  if(!DATA){requestAnimationFrame(loop);return;}
+  const dt=lastTime?time-lastTime:16;lastTime=time;
+  if(animating){
+    let t=Math.min(1,(time-animStart)/animDuration);
+    t=t<0.5?2*t*t:1-Math.pow(-2*t+2,2)/2;
+    currentBasis=lerpBasis(animFrom,animTo,t);
+    if(t>=1){animating=false;currentBasis=copyBasis(animTo);}
+  }
+  applySpin(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function draw(){
+  const w=canvas.width/devicePixelRatio,h=canvas.height/devicePixelRatio;
+  const n=DATA.n_points;
+  const pts=DATA.points;
+  const d=DATA.ambient_dim;
+
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,w,h);
+
+  // Project
+  let xs=new Float32Array(n), ys=new Float32Array(n);
+  let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+  for(let i=0;i<n;i++){
+    if(hiddenShapes.has(DATA.shape_ids[i]))continue;
+    let x=0,y=0;const row=pts[i];
+    for(let j=0;j<d;j++){x+=row[j]*currentBasis[j][0];y+=row[j]*currentBasis[j][1];}
+    xs[i]=x;ys[i]=y;
+    if(x<xmin)xmin=x;if(x>xmax)xmax=x;if(y<ymin)ymin=y;if(y>ymax)ymax=y;
+  }
+  if(xmin===Infinity)return;
+
+  const span=Math.max(xmax-xmin,ymax-ymin)*1.1;
+  const cx=(xmin+xmax)/2,cy=(ymin+ymax)/2;
+  const margin=20,drawSize=Math.min(w,h)-margin*2,sc=drawSize/span;
+  const ox=w/2,oy=h/2;
+
+  for(let i=0;i<n;i++){
+    if(hiddenShapes.has(DATA.shape_ids[i]))continue;
+    const sx=ox+(xs[i]-cx)*sc;
+    const sy=oy+(ys[i]-cy)*sc;
+    const col=DATA.shapes[DATA.shape_ids[i]].color;
+    ctx.fillStyle=col;
+    ctx.globalAlpha=0.6;
+    ctx.beginPath();
+    ctx.arc(sx,sy,2,0,Math.PI*2);
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+</script>
+</body>
+</html>
