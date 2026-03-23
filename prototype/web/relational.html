@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Relational Anamorph</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000; color: #fff;
+    font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+    overflow: hidden; height: 100vh;
+    display: flex; flex-direction: column;
+  }
+  #header { padding: 12px 20px 4px; text-align: center; }
+  #header h1 { font-size: 15px; font-weight: 400; letter-spacing: 3px; text-transform: uppercase; color: #777; }
+  #subtitle { font-size: 11px; color: #444; margin-top: 3px; }
+
+  #main { flex: 1; display: flex; min-height: 0; }
+  #canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+  canvas { border: 1px solid #111; }
+
+  #found-label {
+    position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+    font-size: 24px; font-weight: 700; letter-spacing: 6px; color: #ff4444;
+    text-shadow: 0 0 30px #ff4444; opacity: 0; transition: opacity 0.5s;
+    pointer-events: none;
+  }
+
+  #side {
+    width: 260px; padding: 14px 18px; border-left: 1px solid #111;
+    display: flex; flex-direction: column; gap: 12px; overflow-y: auto;
+  }
+  #side h2 { font-size: 10px; color: #555; letter-spacing: 2px; text-transform: uppercase; }
+
+  .control-group { display: flex; flex-direction: column; gap: 6px; }
+  .control-label { display: flex; justify-content: space-between; font-size: 11px; color: #888; }
+  .control-value { color: #ff4444; font-variant-numeric: tabular-nums; }
+
+  input[type="range"] {
+    -webkit-appearance: none; width: 100%; height: 6px;
+    background: #1a1a1a; border-radius: 3px; outline: none;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 16px; height: 16px;
+    border-radius: 50%; background: #ff4444; cursor: pointer;
+    border: 2px solid #000; box-shadow: 0 0 6px rgba(255,68,68,0.3);
+  }
+
+  .dim-bar {
+    height: 30px; background: #0a0a0a; border: 1px solid #1a1a1a;
+    border-radius: 3px; position: relative; margin-top: 4px; overflow: hidden;
+  }
+  .dim-bar-fill {
+    position: absolute; top: 0; height: 100%; background: #ff444433;
+    border-left: 2px solid #ff4444; border-right: 2px solid #ff4444;
+    transition: left 0.15s, width 0.15s;
+  }
+  .dim-bar-labels {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 6px; font-size: 9px; color: #444;
+  }
+
+  button {
+    background: #111; color: #888; border: 1px solid #222;
+    padding: 7px 12px; font-family: inherit; font-size: 11px;
+    cursor: pointer; border-radius: 3px; transition: all 0.15s; width: 100%;
+  }
+  button:hover { color: #fff; border-color: #444; }
+  button.reveal { border-color: #ff4444; color: #ff4444; }
+
+  .metric-display {
+    text-align: center; padding: 8px 0; border: 1px solid #1a1a1a;
+    border-radius: 4px; background: #0a0a0a;
+  }
+  .metric-big { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .metric-label { font-size: 9px; color: #555; margin-top: 2px; }
+
+  #info { font-size: 9px; color: #2a2a2a; line-height: 1.6; margin-top: auto; }
+
+  .view-toggle { display: flex; gap: 4px; }
+  .view-toggle button { flex: 1; padding: 5px; font-size: 10px; }
+  .view-toggle button.active { border-color: #ff4444; color: #ff4444; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <h1>Relational Anamorph</h1>
+  <div id="subtitle">the form is not in any projection — it's in the neighbor graph under the right metric</div>
+</div>
+
+<div id="main">
+  <div id="canvas-wrap">
+    <canvas id="c"></canvas>
+    <div id="found-label">FORM FOUND</div>
+  </div>
+  <div id="side">
+    <h2>Distance Metric</h2>
+    <div class="control-group">
+      <div class="control-label">
+        <span>Start dimension</span>
+        <span class="control-value" id="start-val">0</span>
+      </div>
+      <input type="range" id="dim-start" min="0" max="87" value="0">
+    </div>
+    <div class="control-group">
+      <div class="control-label">
+        <span>Window size</span>
+        <span class="control-value" id="width-val">12</span>
+      </div>
+      <input type="range" id="dim-width" min="2" max="40" value="12">
+    </div>
+    <div class="dim-bar">
+      <div class="dim-bar-fill" id="dim-fill"></div>
+      <div class="dim-bar-labels"><span>0</span><span>100 dims</span></div>
+    </div>
+
+    <div class="control-group">
+      <div class="control-label">
+        <span>Neighbors (k)</span>
+        <span class="control-value" id="k-val">4</span>
+      </div>
+      <input type="range" id="k-slider" min="2" max="10" value="4">
+    </div>
+
+    <div class="metric-display">
+      <div class="metric-big" id="score-val" style="color:#335">0%</div>
+      <div class="metric-label">edge recovery vs target graph</div>
+    </div>
+
+    <h2>Layout</h2>
+    <div class="view-toggle">
+      <button id="btn-graph" class="active">Graph layout</button>
+      <button id="btn-pca">PCA layout</button>
+    </div>
+
+    <hr style="border:none;border-top:1px solid #111">
+    <button id="btn-reveal" class="reveal">Reveal answer</button>
+    <button id="btn-all-dims">Use all 100 dims</button>
+
+    <div id="info">
+      300 points in 100-dimensional space.
+      No projection reveals the hidden form.
+      Slide the dimension window to select which dims
+      define the distance metric for the neighbor graph.
+      The right window reveals the hidden structure.
+    </div>
+  </div>
+</div>
+
+<script>
+let DATA = null;
+let currentStart = 0, currentWidth = 12, currentK = 4;
+let useGraphLayout = true;
+let edgeRecovery = 0;
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+fetch('relational_data.json')
+  .then(r => r.json())
+  .then(d => { DATA = d; init(); })
+  .catch(e => console.error(e));
+
+function init() {
+  resize();
+  window.addEventListener('resize', resize);
+
+  document.getElementById('dim-start').addEventListener('input', onParamChange);
+  document.getElementById('dim-width').addEventListener('input', onParamChange);
+  document.getElementById('k-slider').addEventListener('input', onParamChange);
+
+  document.getElementById('btn-graph').addEventListener('click', () => {
+    useGraphLayout = true;
+    document.getElementById('btn-graph').classList.add('active');
+    document.getElementById('btn-pca').classList.remove('active');
+    recompute();
+  });
+  document.getElementById('btn-pca').addEventListener('click', () => {
+    useGraphLayout = false;
+    document.getElementById('btn-graph').classList.remove('active');
+    document.getElementById('btn-pca').classList.add('active');
+    recompute();
+  });
+
+  document.getElementById('btn-reveal').addEventListener('click', () => {
+    document.getElementById('dim-start').value = DATA.secret_dims[0];
+    document.getElementById('dim-width').value = DATA.secret_dims[1] - DATA.secret_dims[0];
+    onParamChange();
+  });
+  document.getElementById('btn-all-dims').addEventListener('click', () => {
+    document.getElementById('dim-start').value = 0;
+    document.getElementById('dim-width').value = 40;
+    onParamChange();
+  });
+
+  onParamChange();
+}
+
+function resize() {
+  const wrap = document.getElementById('canvas-wrap');
+  const size = Math.min(wrap.clientWidth - 16, wrap.clientHeight - 16, 800);
+  canvas.width = size * devicePixelRatio;
+  canvas.height = size * devicePixelRatio;
+  canvas.style.width = size + 'px';
+  canvas.style.height = size + 'px';
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+}
+
+function onParamChange() {
+  currentStart = parseInt(document.getElementById('dim-start').value);
+  currentWidth = parseInt(document.getElementById('dim-width').value);
+  currentK = parseInt(document.getElementById('k-slider').value);
+
+  // Clamp
+  if (currentStart + currentWidth > DATA.ambient_dim) {
+    currentStart = DATA.ambient_dim - currentWidth;
+    document.getElementById('dim-start').value = currentStart;
+  }
+
+  document.getElementById('start-val').textContent = currentStart;
+  document.getElementById('width-val').textContent = currentWidth;
+  document.getElementById('k-val').textContent = currentK;
+
+  // Update dim bar
+  const fill = document.getElementById('dim-fill');
+  fill.style.left = (currentStart / DATA.ambient_dim * 100) + '%';
+  fill.style.width = (currentWidth / DATA.ambient_dim * 100) + '%';
+
+  recompute();
+}
+
+// --- k-NN computation ---
+function computeKNN(dimStart, dimEnd, k) {
+  const n = DATA.n_points;
+  const pts = DATA.points;
+  const neighbors = []; // neighbors[i] = [j1, j2, ..., jk]
+
+  for (let i = 0; i < n; i++) {
+    // Compute distances from point i to all others using only dims [dimStart, dimEnd)
+    let dists = [];
+    for (let j = 0; j < n; j++) {
+      if (i === j) { dists.push({j, d: Infinity}); continue; }
+      let d2 = 0;
+      for (let dim = dimStart; dim < dimEnd; dim++) {
+        const diff = pts[i][dim] - pts[j][dim];
+        d2 += diff * diff;
+      }
+      dists.push({j, d: d2});
+    }
+    // Partial sort: find k smallest
+    dists.sort((a, b) => a.d - b.d);
+    neighbors.push(dists.slice(0, k).map(x => x.j));
+  }
+  return neighbors;
+}
+
+function computeEdgeRecovery(neighbors) {
+  const edgeSet = new Set();
+  for (const [i, j] of DATA.target_edges) {
+    edgeSet.add(i * 10000 + j);
+    edgeSet.add(j * 10000 + i);
+  }
+
+  let recovered = 0;
+  let total = 0;
+  for (let i = 0; i < neighbors.length; i++) {
+    for (const j of neighbors[i]) {
+      total++;
+      if (edgeSet.has(i * 10000 + j)) recovered++;
+    }
+  }
+  return recovered / (DATA.target_edges.length * 2);
+}
+
+// Simple PCA for layout
+function pcaLayout(dimStart, dimEnd) {
+  const n = DATA.n_points;
+  const pts = DATA.points;
+  const d = dimEnd - dimStart;
+
+  // Mean
+  let mean = new Array(d).fill(0);
+  for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) mean[j] += pts[i][dimStart + j];
+  mean = mean.map(x => x / n);
+
+  // Power iteration for PC1
+  let v1 = Array.from({length: d}, () => Math.random() - 0.5);
+  for (let iter = 0; iter < 30; iter++) {
+    let nv = new Array(d).fill(0);
+    for (let i = 0; i < n; i++) {
+      let dp = 0;
+      for (let j = 0; j < d; j++) dp += (pts[i][dimStart + j] - mean[j]) * v1[j];
+      for (let j = 0; j < d; j++) nv[j] += dp * (pts[i][dimStart + j] - mean[j]);
+    }
+    let nn = Math.sqrt(nv.reduce((s, x) => s + x * x, 0));
+    v1 = nv.map(x => x / nn);
+  }
+  // PC2
+  let v2 = Array.from({length: d}, () => Math.random() - 0.5);
+  let dp2 = v2.reduce((s, x, i) => s + x * v1[i], 0);
+  v2 = v2.map((x, i) => x - dp2 * v1[i]);
+  let nn2 = Math.sqrt(v2.reduce((s, x) => s + x * x, 0));
+  v2 = v2.map(x => x / nn2);
+  for (let iter = 0; iter < 30; iter++) {
+    let nv = new Array(d).fill(0);
+    for (let i = 0; i < n; i++) {
+      let dp = 0;
+      for (let j = 0; j < d; j++) dp += (pts[i][dimStart + j] - mean[j]) * v2[j];
+      for (let j = 0; j < d; j++) nv[j] += dp * (pts[i][dimStart + j] - mean[j]);
+    }
+    let dd = nv.reduce((s, x, i) => s + x * v1[i], 0);
+    nv = nv.map((x, i) => x - dd * v1[i]);
+    let nn = Math.sqrt(nv.reduce((s, x) => s + x * x, 0));
+    v2 = nv.map(x => x / nn);
+  }
+
+  // Project
+  let layout = [];
+  for (let i = 0; i < n; i++) {
+    let x = 0, y = 0;
+    for (let j = 0; j < d; j++) {
+      x += (pts[i][dimStart + j] - mean[j]) * v1[j];
+      y += (pts[i][dimStart + j] - mean[j]) * v2[j];
+    }
+    layout.push([x, y]);
+  }
+  return layout;
+}
+
+let currentNeighbors = null;
+let currentLayout = null;
+
+function recompute() {
+  const dimEnd = Math.min(currentStart + currentWidth, DATA.ambient_dim);
+  currentNeighbors = computeKNN(currentStart, dimEnd, currentK);
+  edgeRecovery = computeEdgeRecovery(currentNeighbors);
+
+  if (useGraphLayout) {
+    currentLayout = DATA.target_layout;
+  } else {
+    currentLayout = pcaLayout(currentStart, dimEnd);
+  }
+
+  // Update score
+  const pct = Math.round(edgeRecovery * 100);
+  const scoreEl = document.getElementById('score-val');
+  scoreEl.textContent = pct + '%';
+  if (edgeRecovery > 0.2) scoreEl.style.color = '#ff4444';
+  else if (edgeRecovery > 0.1) scoreEl.style.color = '#ffaa44';
+  else scoreEl.style.color = '#4488ff';
+
+  // Found label
+  const foundEl = document.getElementById('found-label');
+  foundEl.style.opacity = edgeRecovery > 0.25 ? '1' : '0';
+
+  draw();
+}
+
+function draw() {
+  const w = canvas.width / devicePixelRatio, h = canvas.height / devicePixelRatio;
+  const n = DATA.n_points;
+
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, w, h);
+
+  if (!currentNeighbors || !currentLayout) return;
+
+  const layout = currentLayout;
+
+  // Bounds
+  let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+  for (let i = 0; i < n; i++) {
+    if (layout[i][0] < xmin) xmin = layout[i][0];
+    if (layout[i][0] > xmax) xmax = layout[i][0];
+    if (layout[i][1] < ymin) ymin = layout[i][1];
+    if (layout[i][1] > ymax) ymax = layout[i][1];
+  }
+
+  const span = Math.max(xmax - xmin, ymax - ymin) * 1.15;
+  const cx = (xmin + xmax) / 2, cy = (ymin + ymax) / 2;
+  const margin = 40, drawSize = Math.min(w, h) - margin * 2, sc = drawSize / span;
+  const ox = w / 2, oy = h / 2;
+
+  // Edge color based on recovery
+  const edgeAlpha = 0.08 + edgeRecovery * 0.4;
+  const edgeColor = edgeRecovery > 0.2
+    ? `rgba(255,68,68,${edgeAlpha})`
+    : `rgba(68,136,255,${edgeAlpha})`;
+
+  // Draw edges
+  ctx.strokeStyle = edgeColor;
+  ctx.lineWidth = 0.8;
+  for (let i = 0; i < n; i++) {
+    const sx1 = ox + (layout[i][0] - cx) * sc;
+    const sy1 = oy + (layout[i][1] - cy) * sc;
+    for (const j of currentNeighbors[i]) {
+      const sx2 = ox + (layout[j][0] - cx) * sc;
+      const sy2 = oy + (layout[j][1] - cy) * sc;
+      ctx.beginPath();
+      ctx.moveTo(sx1, sy1);
+      ctx.lineTo(sx2, sy2);
+      ctx.stroke();
+    }
+  }
+
+  // Draw points
+  const ptColor = edgeRecovery > 0.2 ? '#ff4444' : '#4488ff';
+  ctx.fillStyle = ptColor;
+  for (let i = 0; i < n; i++) {
+    const sx = ox + (layout[i][0] - cx) * sc;
+    const sy = oy + (layout[i][1] - cy) * sc;
+    ctx.globalAlpha = 0.8;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+</script>
+</body>
+</html>
